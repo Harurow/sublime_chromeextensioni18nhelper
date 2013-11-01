@@ -12,6 +12,9 @@ please setup this plugin settings.
 }
 
 Valid location is the following.
+check => 'https://developers.google.com/chrome/web-store/docs/i18n?hl=ja&csw=1#localeTable'
+
 "am ar bg bn ca cs da de el en en_GB en_US es es_419 et fi fil fr gu he hi hr hu
  id it ja kn ko lt lv ml mr nb nl or pl pt pt_BR pt_PT ro ru sk sl sr sv sw ta te
  th tr uk vi zh zh_CN zh_TW"
+

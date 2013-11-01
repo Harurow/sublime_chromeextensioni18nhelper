@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 import sublime
 import sublime_plugin
+import codecs
+import json
 import os
 import re
-import json
 from datetime import *
 
 
@@ -33,11 +34,115 @@ _JS_SUFFIX = r"^\s*\)"
 _JS_FORMAT = "chrome.i18n.getMessage('{0}')"
 
 
+def open_view(path):
+	for w in sublime.windows():
+		v = w.find_open_file(path)
+		if v != None:
+			return v
+	return None
+
+
+def read_json(path):
+	v = open_view(path)
+	if v != None:
+		all_rgn = sublime.Region(0, v.size())
+		all_str = v.substr(all_rgn)
+		return json.loads(all_str)
+	else:
+		with codecs.open(path, 'r', 'utf-8') as fp:
+			return json.load(fp)
+
+
+def write_json(path, obj, sort_keys, indent):
+	dir_name = os.path.dirname(path)
+	if not os.path.isdir(dir_name):
+		os.makedirs(dir_name)
+	with codecs.open(path, 'w', 'utf-8') as fp:
+		json.dump(obj, fp, ensure_ascii = False,
+			sort_keys = sort_keys, indent = indent)
+
+
 class ReplaceCommand(sublime_plugin.TextCommand):
 	def run(self, edit, **args):
 		if "a" in args and "b" in args and "text" in args:
 			r = sublime.Region(args["a"], args["b"])
 			self.view.replace(edit, r, args["text"])
+
+
+class MessageJsonHelperCommand(sublime_plugin.TextCommand):
+	def run(self, edit):
+		file_name = self.view.file_name()
+		current_path = os.path.dirname(file_name)
+		locale_name = os.path.basename(current_path)
+		locales_path = os.path.dirname(current_path)
+		locales_name = os.path.basename(locales_path)
+
+		if locales_name == _LOCALES_DIR and locale_name in _LOCALES:
+			settings = sublime.load_settings(_SETTINGS_NAME)
+			self.locales_dir = locales_path
+			self.def_loc = settings.get("default_locale")
+			self.support_locales = settings.get("support_locales")
+			self.gen_dsc = settings.get("generate_description")
+			self.indent = settings.get("indent")
+			self.sort_keys = settings.get("sort_keys")
+
+			self.locales_path = locales_path
+
+			if locale_name == self.def_loc:
+				self.run_default_locale()
+			else:
+				self.run_other_locale()
+		else:
+			sublime.status_message("invalid locale")
+
+	def run_default_locale(self):
+		all_rgn = sublime.Region(0, self.view.size())
+		all_str =self.view.substr(all_rgn)
+		tmpl_loc = json.loads(all_str)
+		for k in tmpl_loc.keys():
+			tmpl_loc[k][_DSC] = "from '" + self.def_loc \
+								+ "' : " + tmpl_loc[k][_MSG]
+
+		items = []
+		items_loc = []
+
+		items.append("copy/marge to supported all files ('"
+					+ "', '".join(self.support_locales) + "')")
+		items_loc.append(self.support_locales)
+
+		for s in self.support_locales:
+			if os.path.isfile(os.path.join(self.locales_path
+					, s, _MESSAGES_JSON_FILE)):
+				method = "marge "
+			else:
+				method = "copy "
+
+			items.append(method + "to '" + s + "'")
+			items_loc.append([s])
+
+		def on_done(index):
+			if index < 0:
+				return
+			locs = items_loc[index]
+
+			for loc in locs:
+				path = os.path.join(self.locales_path, loc, _MESSAGES_JSON_FILE)
+				if (os.path.isfile(path)):
+					print("marge to " + loc)
+					o_loc = read_json(path)
+					for k in tmpl_loc.keys():
+						if k not in o_loc:
+							o_loc[k] = tmpl_loc[k]
+					write_json(path, o_loc, self.sort_keys, self.indent)
+				else:
+					print("copy to " + loc)
+					write_json(path, tmpl_loc, self.sort_keys, self.indent)
+				self.view.window().open_file(path)
+
+		self.view.window().show_quick_panel(items, on_done)
+
+	def run_other_locale(self):
+		print ("other loc")
 
 
 class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
@@ -86,8 +191,9 @@ class I18nHelper:
 
 		for loc in self.sup_locs:
 			if loc not in _LOCALES:
-				sublime.error_message('invalid settings : "support_locales": [..."'
-									+ loc + '" ...]')
+				sublime.error_message(
+					'invalid settings : "support_locales": [..."'
+					 + loc + '" ...]')
 				view.window().open_file("${packages}/User/" + _SETTINGS_NAME)
 				raise Exception('invalid settings : "support_locales"', loc)
 
@@ -119,19 +225,11 @@ class I18nHelper:
 			with open(def_loc_path, 'w') as fp:
 				fp.writelines("{\n}");
 
-		return self.read_json(def_loc_path)
+		return read_json(def_loc_path)
 
 	def write_default_message_json(self):
 		def_loc_path = self.get_default_message_json_path()
-		self.write_json(def_loc_path, self.def_msg)
-
-	def read_json(self, path):
-		with open(path, 'r') as fp:
-			return json.load(fp)
-
-	def write_json(self, path, obj):
-		with open(path, 'w') as fp:
-			json.dump(obj, fp, sort_keys = self.sort_keys, indent = self.indent)
+		write_json(def_loc_path, self.def_msg, self.sort_keys, self.indent)
 
 	def add_msg(self, name, msg, dsc):
 		msg_obj = {}
@@ -308,7 +406,8 @@ class JavaScriptHelper(I18nHelper):
 		pre = self.view.substr(sublime.Region(left, sel.a - 1))
 		suf = self.view.substr(sublime.Region(sel.b + 1, sel.b + 16))
 
-		if re.search(_JS_PREFIX, pre) != None and re.search(_JS_SUFFIX, suf) != None:
+		if re.search(_JS_PREFIX, pre) != None \
+				and re.search(_JS_SUFFIX, suf) != None:
 			self.run_update(sel, selstr)
 		else:
 			self.run_new(sel, selstr)
@@ -363,33 +462,3 @@ class JavaScriptHelper(I18nHelper):
 		self.register_msg(self.cur_msg_name, self.cur_msg_str,
 							self.cur_msg_dsc, False)
 
-
-class MessageJsonHelperCommand(sublime_plugin.TextCommand):
-	def run(self, edit):
-		file_name = self.view.file_name()
-		current_path = os.path.dirname(file_name)
-		locale_name = os.path.basename(current_path)
-		locales_path = os.path.dirname(file_name)
-		locales_name = os.path.basename(locales_path)
-
-		if locales_name == _LOCALES_DIR and locale_name in _LOCALES:
-			settings = sublime.load_settings(_SETTINGS_NAME)
-			self.locales_dir = locales_path
-			self.def_loc = settings.get("default_locale")
-			self.gen_dsc = settings.get("generate_description")
-			self.indent = settings.get("indent")
-			self.sort_keys = settings.get("sort_keys")
-			self.msg_name_prefix = settings.get("msg_name_prefix")
-
-			if locale_name == self.def_loc:
-				self.run_default_locale()
-			else:
-				self.run_other_locale()
-		else:
-			print ("invalid locale")
-
-	def run_default_locale(self):
-		pass
-
-	def run_other_locale(self):
-		pass
