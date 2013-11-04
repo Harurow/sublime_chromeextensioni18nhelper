@@ -5,9 +5,12 @@ import codecs
 import json
 import os
 import re
+import urllib
+import webbrowser
 from datetime import *
 
 
+_FORM_URL = "http://translate.google.com/{0}/{1}/{2}"
 _SETTINGS_NAME = "ChromeExtensionI18nHelper.sublime-settings"
 _MANIFEST_JSON_FILE = "manifest.json"
 _MESSAGES_JSON_FILE = "messages.json"
@@ -19,7 +22,7 @@ _LOCALES = ["ar", "am", "bg", "bn", "ca", "cs", "da", "de", "el",
 			"nl", "no", "pl", "pt_BR", "pt_PT", "ro", "ru", "sk",
 			"sl", "sr", "sv", "sw", "ta", "te", "th", "tr", "uk",
 			"vi", "zh_CN", "zh_TW"]
-_SCRIPT_EXTS = [".js"]
+_SCRIPT_EXT = ".js"
 _MSG = "message"
 _DSC = "description"
 _R_KEY = "msgjsonhelper"
@@ -32,7 +35,99 @@ _JSON_SUFFIX = "__"
 _JS_PREFIX = r"[^_A-Za-z1-9]chrome\s*[.]\s*i18n\s*[.]\s*getMessage\s*\(\s*$"
 _JS_SUFFIX = r"^\s*\)"
 _JS_FORMAT = "chrome.i18n.getMessage('{0}')"
+_MSG_PREFIX = "{\s*['\"]message['\"]\s*:\s*"
 
+
+_MODE_NONE = "none"
+_MODE_MANIFEST = "manifest.json"
+_MODE_JAVASCRIPT = "*.js"
+_MODE_DEF_MESSAGE = "default message.json"
+_MODE_OTH_MESSAGE = "other message.json"
+
+_mode = _MODE_NONE
+
+
+class ChromeExtensionI18nHelperEventListener(sublime_plugin.EventListener):
+	def set_mode(self, val):
+		global _mode
+		_mode = val
+
+	def on_activated(self, view):
+		file_name = view.file_name()
+		if file_name == None:
+			self.set_mode(_MODE_NONE)
+			return
+
+		base_name = os.path.basename(file_name)
+		if base_name == _MANIFEST_JSON_FILE:
+			self.set_mode(_MODE_MANIFEST)
+			return
+
+		if base_name.endswith(_SCRIPT_EXT):
+			self.set_mode(_MODE_JAVASCRIPT)
+			return
+
+		if base_name != _MESSAGES_JSON_FILE:
+			self.set_mode(_MODE_NONE)
+			return
+
+		path = os.path.dirname(file_name)
+		locale = os.path.basename(path)
+
+		if locale not in _LOCALES:
+			self.set_mode(_MODE_NONE)
+			return
+
+		path = os.path.dirname(path)
+		locales = os.path.basename(path)
+		if locales != _LOCALES_DIR:
+			self.set_mode(_MODE_NONE)
+			return
+
+		settings = sublime.load_settings(_SETTINGS_NAME)
+		def_locale = settings.get("default_locale")
+
+		if def_locale == locale:
+			self.set_mode(_MODE_DEF_MESSAGE)
+		else:
+			self.set_mode(_MODE_OTH_MESSAGE)
+
+# menu control
+
+class ChromeExtensionI18nHelperCopyToCommand(sublime_plugin.TextCommand):
+	def run(self, edit, **args):
+		self.view.run_command("message_json_helper")
+
+	def is_visible(self):
+		return _mode == _MODE_DEF_MESSAGE
+
+
+class ChromeExtensionI18nHelperCopyFromCommand(sublime_plugin.TextCommand):
+	def run(self, edit, **args):
+		self.view.run_command("message_json_helper")
+
+	def is_visible(self):
+		return _mode == _MODE_OTH_MESSAGE
+
+
+class ChromeExtensionI18nHelperMessageCommand(sublime_plugin.TextCommand):
+	def run(self, edit, **args):
+		self.view.run_command("chrome_extension_i18n_helper")
+
+	def is_visible(self):
+		return _mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT
+
+	def is_enabled(self):
+		if _mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT:
+			for s in self.view.sel():
+				r = self.view.extract_scope(s.a)
+				str = self.view.substr(r)
+				if (str.startswith('"') and str.endswith('"') or
+					str.startswith("'") and str.endswith("'")):
+					return True
+		return False
+
+# json functions
 
 def open_view(path):
 	for w in sublime.windows():
@@ -57,10 +152,22 @@ def write_json(path, obj, sort_keys, indent):
 	dir_name = os.path.dirname(path)
 	if not os.path.isdir(dir_name):
 		os.makedirs(dir_name)
+
 	with codecs.open(path, 'w', 'utf-8') as fp:
 		json.dump(obj, fp, ensure_ascii = False,
 			sort_keys = sort_keys, indent = indent)
 
+# translate
+
+class GoogleTranslate:
+	def translate(from_lang, to_lang, text, newTab):
+		url = str.format(_FORM_URL, from_lang, to_lang, urllib.quote(text.strip()))
+		if newTab:
+			webbrowser.open_new_tab(url)
+		else:
+			webbrowser.open(url)
+
+# command
 
 class ReplaceCommand(sublime_plugin.TextCommand):
 	def run(self, edit, **args):
@@ -85,6 +192,7 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 			self.gen_dsc = settings.get("generate_description")
 			self.indent = settings.get("indent")
 			self.sort_keys = settings.get("sort_keys")
+			self.translate_new_tab = settings.get("translate_new_tab")
 
 			self.locales_path = locales_path
 
@@ -95,19 +203,18 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 		else:
 			sublime.status_message("invalid locale")
 
-	def run_default_locale(self):
-		all_rgn = sublime.Region(0, self.view.size())
-		all_str =self.view.substr(all_rgn)
-		tmpl_loc = json.loads(all_str)
+	def make_template_json(self, path):
+		tmpl_loc = read_json(path)
 		for k in tmpl_loc.keys():
 			tmpl_loc[k][_DSC] = "from '" + self.def_loc \
 								+ "' : " + tmpl_loc[k][_MSG]
+		return tmpl_loc
 
+	def run_default_locale(self):
 		items = []
 		items_loc = []
 
-		items.append("copy/marge to supported all files ('"
-					+ "', '".join(self.support_locales) + "')")
+		items.append("copy/marge to supported all files")
 		items_loc.append(self.support_locales)
 
 		for s in self.support_locales:
@@ -124,6 +231,8 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 			if index < 0:
 				return
 			locs = items_loc[index]
+
+			tmpl_loc = self.make_template_json(self.view.file_name())
 
 			for loc in locs:
 				path = os.path.join(self.locales_path, loc, _MESSAGES_JSON_FILE)
@@ -142,7 +251,22 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 		self.view.window().show_quick_panel(items, on_done)
 
 	def run_other_locale(self):
-		print ("other loc")
+		oth_path = self.view.file_name()
+		def_path = os.path.join(os.path.dirname(os.path.dirname(oth_path)),
+								self.def_loc, _MESSAGES_JSON_FILE)
+		if not os.path.isfile(def_path):
+			sublime.error_message(str.format(
+				"not exists default({0}) message.json file.", self.def_loc))
+			return
+
+		tmpl_loc = self.make_template_json(def_path)
+
+		print("marge from " + self.def_loc)
+		o_loc = read_json(oth_path)
+		for k in tmpl_loc.keys():
+			if k not in o_loc:
+				o_loc[k] = tmpl_loc[k]
+		write_json(oth_path, o_loc, self.sort_keys, self.indent)
 
 
 class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
@@ -157,7 +281,7 @@ class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
 		cmd_helper = None
 		if base_name == _MANIFEST_JSON_FILE:
 			cmd_helper = ManifestHelper(self.view)
-		elif ext_name in _SCRIPT_EXTS:
+		elif ext_name == _SCRIPT_EXT:
 			cmd_helper = JavaScriptHelper(self.view)
 
 		if cmd_helper:
@@ -170,7 +294,11 @@ class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
 		elif base_name == _MESSAGES_JSON_FILE:
 			self.view.run_command("message_json_helper")
 		else:
-			sublime.message_dialog("not support file.")
+			sublime.message_dialog("NOT SUPPORT FILE TYPE.\n\n" \
+				+ "    Support files\n" \
+				+ "        - javascripts(*.js)\n"
+				+ "        - manifest.json\n"
+				+ "        - message.json")
 
 
 class I18nHelper:

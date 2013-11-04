@@ -1,0 +1,8 @@
+[
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-start-separator" },
+	{ "caption": "Copy/Marge to other 'message.json'", 
+	  "command": "chrome_extension_i18n_helper_copy_to" },
+	{ "caption": "Marge from default 'message.json'",
+	  "command": "chrome_extension_i18n_helper_copy_from" },
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-end-separator" }
+]

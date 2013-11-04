@@ -67,5 +67,6 @@
     "generate_description": true,
     "indent": 4,
     "sort_keys": true,
-    "msg_name_prefix": "msg"
+    "msg_name_prefix": "msg",
+    "translate_new_tab": "true"
 }

@@ -3,44 +3,15 @@
 Sublime Text 2/3 plug-in.
 
 This plug-in support your `manifest.json`, `message.json` file.
-using chorome.i18n application.
+using chrome.i18n application.
 
-ex)
+## Commands ##
 
-manifest.json to message.json
+### copy/merge to message.json ###
+copy/merge from default locale message.json file to other locale message.json files.
 
-*before:*
-```json
-# manifest.json
-  {
-    "name": "HogeHoge Application"
-  }
-```
-*after:*
-```json
-# manifest.json
-  {
-    "name": "__MSG_appName__"
-  }
-# _locales/en/messages.json
-  {
-    "appName": {
-      "message": "HogeHoge Application"
-    }
-  }
-
-
-Translation localized message.json from default locale.
-
-# _locales/ja/messages.json
-  {
-    "appName": {
-      "message": "HogeHogeアプリケーション"
-      "description": "manifest.json - name(en->ja)"
-    }
-  }
-```
-
+### add message helper ###
+direct add message from message.json manifest.json or javascript(*.js).
 
 ## How to Install ##
 
