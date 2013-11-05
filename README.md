@@ -8,10 +8,13 @@ using chrome.i18n application.
 ## Commands ##
 
 ### copy/merge to message.json ###
-copy/merge from default locale message.json file to other locale message.json files.
+Copy or merge to other locale message.json files from default locale message.json file.
 
 ### add message helper ###
-direct add message from message.json manifest.json or javascript(*.js).
+Add a message to default message.json file from manifest.json file or javascript(*.js) files directly.
+
+### tranlate helper ###
+Transfer via a browser to Google translate text from message.json file
 
 ## How to Install ##
 

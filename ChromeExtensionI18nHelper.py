@@ -10,7 +10,7 @@ import webbrowser
 from datetime import *
 
 
-_FORM_URL = "http://translate.google.com/{0}/{1}/{2}"
+_FORM_URL = "http://www.google.com/translate_t?langpair={0}|{1}&text={2}"
 _SETTINGS_NAME = "ChromeExtensionI18nHelper.sublime-settings"
 _MANIFEST_JSON_FILE = "manifest.json"
 _MESSAGES_JSON_FILE = "messages.json"
@@ -25,16 +25,18 @@ _LOCALES = ["ar", "am", "bg", "bn", "ca", "cs", "da", "de", "el",
 _SCRIPT_EXT = ".js"
 _MSG = "message"
 _DSC = "description"
-_R_KEY = "msgjsonhelper"
+_R_KEY = "chromeextensioni18nhelper"
+_R2_KEY = "chromeextensioni18nhelper2"
 _R_SCOPE = "highlight"
 _R_ICON = ""
 _R_FLGS = 0
 _MSG_NAME_REG = '^[_A-Za-z][_A-Za-z1-9]+$'
-_JSON_PREFIX = "__MSG_"
-_JSON_SUFFIX = "__"
+_JSON_PREFIX = r"__MSG_"
+_JSON_SUFFIX = r"__"
+_JSON_FORMAT = '"__MSG_{0}__"'
 _JS_PREFIX = r"[^_A-Za-z1-9]chrome\s*[.]\s*i18n\s*[.]\s*getMessage\s*\(\s*$"
 _JS_SUFFIX = r"^\s*\)"
-_JS_FORMAT = "chrome.i18n.getMessage('{0}')"
+_JS_FORMAT = 'chrome.i18n.getMessage("{0}")'
 _MSG_PREFIX = "{\s*['\"]message['\"]\s*:\s*"
 
 
@@ -94,30 +96,21 @@ class ChromeExtensionI18nHelperEventListener(sublime_plugin.EventListener):
 
 # menu control
 
-class ChromeExtensionI18nHelperCopyToCommand(sublime_plugin.TextCommand):
+class ChromeExtensionI18nHelperContextCommand(sublime_plugin.TextCommand):
 	def run(self, edit, **args):
-		self.view.run_command("message_json_helper")
+		if args["method"] == "trans":
+			self.view.run_command("chrome_extension_i18n_google_trans")
+		else:
+			self.view.run_command("chrome_extension_i18n_helper")
 
-	def is_visible(self):
-		return _mode == _MODE_DEF_MESSAGE
+	def is_visible(self, **args):
+		return ( args["method"] == "copy_to" and _mode == _MODE_DEF_MESSAGE
+				or args["method"] == "copy_from" and _mode == _MODE_OTH_MESSAGE
+				or args["method"] == "add_message" and (
+						_mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT)
+				or args["method"] == "trans" and _mode == _MODE_OTH_MESSAGE)
 
-
-class ChromeExtensionI18nHelperCopyFromCommand(sublime_plugin.TextCommand):
-	def run(self, edit, **args):
-		self.view.run_command("message_json_helper")
-
-	def is_visible(self):
-		return _mode == _MODE_OTH_MESSAGE
-
-
-class ChromeExtensionI18nHelperMessageCommand(sublime_plugin.TextCommand):
-	def run(self, edit, **args):
-		self.view.run_command("chrome_extension_i18n_helper")
-
-	def is_visible(self):
-		return _mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT
-
-	def is_enabled(self):
+	def is_enabled(self, **args):
 		if _mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT:
 			for s in self.view.sel():
 				r = self.view.extract_scope(s.a)
@@ -125,7 +118,34 @@ class ChromeExtensionI18nHelperMessageCommand(sublime_plugin.TextCommand):
 				if (str.startswith('"') and str.endswith('"') or
 					str.startswith("'") and str.endswith("'")):
 					return True
-		return False
+			return False
+
+		if args["method"] == "trans" and _mode == _MODE_OTH_MESSAGE:
+			s = self.view.sel()[0]
+			r = self.view.extract_scope(s.a)
+			str = self.view.substr(r)
+			if (str.startswith('"') and str.endswith('"') or
+				str.startswith("'") and str.endswith("'")):
+				return True
+			return False
+
+		return True
+
+
+class ChromeExtensionI18nHelperSidebarCommand(sublime_plugin.WindowCommand):
+	def run(self, paths, **args):
+		v = self.window.active_view()
+		if v:
+			v.run_command("message_json_helper")
+
+	def is_visible(self, paths, **args):
+		if len(paths) == 0 or self.window.active_view() == None:
+			return False
+		if (paths[0] != self.window.active_view().file_name()):
+			return False
+
+		return ( args["method"] == "copy_to" and _mode == _MODE_DEF_MESSAGE or
+				 args["method"] == "copy_from" and _mode == _MODE_OTH_MESSAGE )
 
 # json functions
 
@@ -159,13 +179,34 @@ def write_json(path, obj, sort_keys, indent):
 
 # translate
 
-class GoogleTranslate:
-	def translate(from_lang, to_lang, text, newTab):
-		url = str.format(_FORM_URL, from_lang, to_lang, urllib.quote(text.strip()))
+class ChromeExtensionI18nGoogleTransCommand(sublime_plugin.TextCommand):
+	def translate(self, from_lang, to_lang, text, newTab):
+		if hasattr(urllib, "parse"):
+			text = urllib.parse.quote_plus(text.strip())
+		else:
+			text = urllib.quote_plus(text.strip())
+		print (text)
+		url = str.format(_FORM_URL, from_lang, to_lang, text)
+		print (url)
 		if newTab:
 			webbrowser.open_new_tab(url)
 		else:
 			webbrowser.open(url)
+
+	def run(self, edit, **args):
+		file_name = self.view.file_name()
+		current_path = os.path.dirname(file_name)
+		locale = os.path.basename(current_path)
+
+		settings = sublime.load_settings(_SETTINGS_NAME)
+		def_loc = settings.get("default_locale")
+		new_tab = settings.get("translate_new_tab")
+
+		s = self.view.sel()[0]
+		r = self.view.extract_scope(s.a)
+		str = self.view.substr(r)[1:-1]
+
+		self.translate(def_loc, locale, str, new_tab)
 
 # command
 
@@ -214,13 +255,13 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 		items = []
 		items_loc = []
 
-		items.append("copy/marge to supported all files")
+		items.append("copy/merge to supported all files")
 		items_loc.append(self.support_locales)
 
 		for s in self.support_locales:
 			if os.path.isfile(os.path.join(self.locales_path
 					, s, _MESSAGES_JSON_FILE)):
-				method = "marge "
+				method = "merge "
 			else:
 				method = "copy "
 
@@ -237,7 +278,7 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 			for loc in locs:
 				path = os.path.join(self.locales_path, loc, _MESSAGES_JSON_FILE)
 				if (os.path.isfile(path)):
-					print("marge to " + loc)
+					print("merge to " + loc)
 					o_loc = read_json(path)
 					for k in tmpl_loc.keys():
 						if k not in o_loc:
@@ -261,7 +302,7 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 
 		tmpl_loc = self.make_template_json(def_path)
 
-		print("marge from " + self.def_loc)
+		print("merge from " + self.def_loc)
 		o_loc = read_json(oth_path)
 		for k in tmpl_loc.keys():
 			if k not in o_loc:
@@ -374,15 +415,15 @@ class I18nHelper:
 			r = self.view.extract_scope(s.a)
 			str = self.view.substr(r)
 			if self.is_match(str, '"', '"') or self.is_match(str, "'", "'"):
-				sels.append(sublime.Region(r.a + 1, r.b - 1))
+				sels.append(sublime.Region(r.a, r.b))
 
 		self.reset_regions(sels)
 
 	def reset_regions(self, sel):
-		self.view.erase_regions(_R_KEY)
+		self.erase_regions()
 		sels = [s for s in sel if not s.empty()]
 		if len(sels) > 0:
-			self.view.add_regions(_R_KEY, sels, _R_SCOPE, _R_ICON, _R_FLGS)
+			self.view.add_regions(_R_KEY, sels, _R_SCOPE, _R_ICON, _R_FLGS | sublime.DRAW_NO_FILL)
 
 	def peek_region(self):
 		regions = self.view.get_regions(_R_KEY)
@@ -400,6 +441,7 @@ class I18nHelper:
 
 	def erase_regions(self):
 		self.view.erase_regions(_R_KEY)
+		self.view.erase_regions(_R_KEY2)
 
 	def is_match(self, str, prefix, suffix):
 		return str.startswith(prefix) and str.endswith(suffix)
@@ -415,90 +457,11 @@ class I18nHelper:
 		return ""
 
 
-class ManifestHelper(I18nHelper): 
+class MessageHelper(I18nHelper):
 	def get_default_message_json_path(self):
 		file_name = self.view.file_name()
 		dir_name = os.path.dirname(file_name)
-		return os.path.abspath(os.path.join(dir_name, _LOCALES_DIR,
-									self.def_loc, _MESSAGES_JSON_FILE))
 
-	def on_cancel(self):
-		self.cancel()
-
-	def register_msg(self, name, msg, dsc):
-		self.add_msg(name, msg, dsc)
-
-		text = _JSON_PREFIX + name + _JSON_SUFFIX
-		r = self.pop_region()
-		self.view.run_command("replace", {"a": r.a, "b": r.b, "text": text})
-		self.run()
-
-	def run(self):
-		sel = self.peek_region()
-		if sel == None:
-			return
-
-		selstr = self.view.substr(sel)
-		if self.is_match(selstr, _JSON_PREFIX, _JSON_SUFFIX):
-			self.run_update(sel, selstr)
-		else:
-			self.run_new(sel, selstr)
-
-	def run_new(self, sel, selstr):
-		self.cur_msg_name = self.get_default_msg_name()
-		self.cur_msg_str = selstr
-		self.cur_msg_dsc = ""
-
-		self.view.show(self.peek_region())
-		self.input_msg_name()
-
-	def input_msg_name(self):
-		self.view.window().show_input_panel("Input message name:",
-			self.cur_msg_name, self.on_done_msg_name, None, self.on_cancel)
-
-	def on_done_msg_name(self, text):
-		if not self.is_valid_name(text):
-			sublime.error_message("invalid message name")
-			self.input_msg_name()
-			return
-
-		self.cur_msg_name = text
-		if text in self.def_msg:
-			cnfmsg = "Input message name with the same name already exists.\n"
-			cnfmsg += "Do you overwrite it ?"
-			if not sublime.ok_cancel_dialog(cnfmsg, "Yes, I do."):
-				return
-
-		self.register_msg(self.cur_msg_name, self.cur_msg_str, self.cur_msg_dsc)
-
-	def run_update(self, sel, selstr):
-		self.cur_msg_name = selstr[len(_JSON_PREFIX):
-									-len(_JSON_SUFFIX)]
-		self.cur_msg_str = ""
-		self.cur_msg_dsc = ""
-
-		if self.cur_msg_name in self.def_msg:
-			msg_obj = self.def_msg[self.cur_msg_name]
-			self.cur_msg_str = msg_obj[_MSG] if _MSG in msg_obj else ""
-			self.cur_msg_dsc = msg_obj[_DSC] if _DSC in msg_obj else ""
-
-		self.view.show(self.peek_region())
-		self.input_msg_text()
-
-	def input_msg_text(self):
-		self.view.window().show_input_panel("update message:",
-			self.cur_msg_str, self.on_done_msg_text, None, self.on_cancel)
-
-	def on_done_msg_text(self, text):
-		self.cur_msg_str = text
-		self.register_msg(self.cur_msg_name, self.cur_msg_str, self.cur_msg_dsc)
-
-
-class JavaScriptHelper(I18nHelper):
-	def get_default_message_json_path(self):
-		file_name = self.view.file_name()
-		dir_name = os.path.dirname(file_name)
-		
 		test_path = os.path.abspath(os.path.join(dir_name, _LOCALES_DIR))
 		if os.path.isdir(test_path):
 			return os.path.join(test_path, self.def_loc, _MESSAGES_JSON_FILE)
@@ -512,37 +475,22 @@ class JavaScriptHelper(I18nHelper):
 	def on_cancel(self):
 		self.cancel()
 
-	def register_msg(self, name, msg, dsc, isNew):
-		self.add_msg(name, msg, dsc)
-
-		text = str.format(_JS_FORMAT, name)
-		r = self.pop_region()
-		if isNew:
-			self.view.run_command("replace",
-				{"a": r.a - 1, "b": r.b + 1, "text": text})
-		self.run()
-
 	def run(self):
 		sel = self.peek_region()
 		if sel == None:
 			return
 
-		selstr = self.view.substr(sel)
+		self.view.add_regions(_R_KEY2, [sel], _R_SCOPE, _R_ICON, _R_FLGS)
 
-		left = (sel.a - 32) if (sel.a - 32) > 0 else 0
-		
-		pre = self.view.substr(sublime.Region(left, sel.a - 1))
-		suf = self.view.substr(sublime.Region(sel.b + 1, sel.b + 16))
-
-		if re.search(_JS_PREFIX, pre) != None \
-				and re.search(_JS_SUFFIX, suf) != None:
-			self.run_update(sel, selstr)
+		str = self.view.substr(sel)
+		if self.is_update(sel):
+			self.run_update(sel, str)
 		else:
-			self.run_new(sel, selstr)
+			self.run_new(sel, str)
 
 	def run_new(self, sel, selstr):
 		self.cur_msg_name = self.get_default_msg_name()
-		self.cur_msg_str = selstr
+		self.cur_msg_str = selstr[1:-1]
 		self.cur_msg_dsc = ""
 
 		self.view.show(self.peek_region())
@@ -568,8 +516,8 @@ class JavaScriptHelper(I18nHelper):
 		self.register_msg(self.cur_msg_name, self.cur_msg_str,
 							self.cur_msg_dsc, True)
 
-	def run_update(self, sel, selstr):
-		self.cur_msg_name = selstr
+	def run_update(self, sel, str):
+		self.cur_msg_name = self.get_message_name(str)
 		self.cur_msg_str = ""
 		self.cur_msg_dsc = ""
 
@@ -590,3 +538,50 @@ class JavaScriptHelper(I18nHelper):
 		self.register_msg(self.cur_msg_name, self.cur_msg_str,
 							self.cur_msg_dsc, False)
 
+	def register_msg(self, name, msg, dsc, isNew):
+		self.add_msg(name, msg, dsc)
+
+		text = str.format(self.format, name)
+		r = self.pop_region()
+		if isNew:
+			self.view.run_command("replace", {"a": r.a, "b": r.b, "text": text})
+		self.run()
+
+	def is_update(self, sel):
+		pass
+
+	def get_message_name(self, str):
+		pass
+
+
+class ManifestHelper(MessageHelper):
+	def __init__(self, view):
+		MessageHelper.__init__(self, view)
+		self.format = _JSON_FORMAT
+
+	def is_update(self, sel):
+		str = self.view.substr(sel)[1:-1]
+		return self.is_match(str, _JSON_PREFIX, _JSON_SUFFIX)
+
+	def get_message_name(self, str):
+		return str[len(_JSON_PREFIX) + 1 :-(len(_JSON_SUFFIX) + 1)]
+
+
+class JavaScriptHelper(MessageHelper):
+	def __init__(self, view):
+		MessageHelper.__init__(self, view)
+		self.format = _JS_FORMAT
+
+	def is_update(self, sel):
+		left = (sel.a - 32) if (sel.a - 32) > 0 else 0
+		
+		pre = self.view.substr(sublime.Region(left, sel.a))
+		suf = self.view.substr(sublime.Region(sel.b, sel.b + 16))
+
+		if re.search(_JS_PREFIX, pre) != None \
+				and re.search(_JS_SUFFIX, suf) != None:
+			return True
+		return False
+
+	def get_message_name(self, str):
+		return str[1:-1]
