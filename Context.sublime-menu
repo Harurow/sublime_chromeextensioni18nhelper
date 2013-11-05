@@ -1,0 +1,12 @@
+[
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-start-separator" },
+	{ "caption": "Copy/Merge to other 'message.json'", 
+	  "command": "chrome_extension_i18n_helper_context", "args": {"method": "copy_to"} },
+	{ "caption": "Merge from default 'message.json'",
+	  "command": "chrome_extension_i18n_helper_context", "args": {"method": "copy_from"} },
+	{ "caption": "Add/Update to default 'message.json'",
+	  "command": "chrome_extension_i18n_helper_context", "args": {"method": "add_message"} },
+	{ "caption": "Send to Google Translate",
+	  "command": "chrome_extension_i18n_helper_context", "args": {"method": "trans"} },
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-end-separator" }
+]

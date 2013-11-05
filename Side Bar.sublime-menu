@@ -1,0 +1,8 @@
+[
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-start-separator" },
+	{ "caption": "Copy/Merge to other 'message.json'", 
+	  "command": "chrome_extension_i18n_helper_sidebar", "args": {"paths":[], "method": "copy_to"} },
+	{ "caption": "Merge from default 'message.json'",
+	  "command": "chrome_extension_i18n_helper_sidebar", "args": {"paths":[], "method": "copy_from"} },
+	{ "caption": "-", "id": "chrome-extension-i18n-helper-end-separator" }
+]
