@@ -192,9 +192,7 @@ class ChromeExtensionI18nGoogleTransCommand(sublime_plugin.TextCommand):
 			text = urllib.parse.quote_plus(text.strip())
 		else:
 			text = urllib.quote_plus(text.strip())
-		print (text)
 		url = str.format(_FORM_URL, from_lang, to_lang, text)
-		print (url)
 		if newTab:
 			webbrowser.open_new_tab(url)
 		else:
@@ -333,7 +331,6 @@ class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
 			messages = [];
 			ids = [];
 			for m in msgs:
-				print (msgs[m])
 				ids.append(m);
 				messages.append(msgs[m]["message"]);
 
