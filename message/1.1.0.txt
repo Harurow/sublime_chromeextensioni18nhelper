@@ -1,0 +1,6 @@
+ChromeExtensionI18nHelper
+=========================
+
+* New *
+Add 'paste message id' command in context menu.
+Paste message id by selecting from default messages.json file.

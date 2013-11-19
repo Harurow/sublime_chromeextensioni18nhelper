@@ -43,8 +43,8 @@ _MSG_PREFIX = "{\s*['\"]message['\"]\s*:\s*"
 _MODE_NONE = "none"
 _MODE_MANIFEST = "manifest.json"
 _MODE_JAVASCRIPT = "*.js"
-_MODE_DEF_MESSAGE = "default message.json"
-_MODE_OTH_MESSAGE = "other message.json"
+_MODE_DEF_MESSAGE = "default messages.json"
+_MODE_OTH_MESSAGE = "other messages.json"
 
 _mode = _MODE_NONE
 
@@ -98,20 +98,27 @@ class ChromeExtensionI18nHelperEventListener(sublime_plugin.EventListener):
 
 class ChromeExtensionI18nHelperContextCommand(sublime_plugin.TextCommand):
 	def run(self, edit, **args):
-		if args["method"] == "trans":
+		method = args["method"]
+		if method == "trans":
 			self.view.run_command("chrome_extension_i18n_google_trans")
 		else:
-			self.view.run_command("chrome_extension_i18n_helper")
+			self.view.run_command("chrome_extension_i18n_helper", args)
 
 	def is_visible(self, **args):
-		return ( args["method"] == "copy_to" and _mode == _MODE_DEF_MESSAGE
-				or args["method"] == "copy_from" and _mode == _MODE_OTH_MESSAGE
-				or args["method"] == "add_message" and (
+		method = args["method"]
+		return ( method == "copy_to" and _mode == _MODE_DEF_MESSAGE
+				or method == "copy_from" and _mode == _MODE_OTH_MESSAGE
+				or (method == "add_message" or method == "paste_message") and (
 						_mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT)
-				or args["method"] == "trans" and _mode == _MODE_OTH_MESSAGE)
+				or method == "trans" and _mode == _MODE_OTH_MESSAGE)
 
 	def is_enabled(self, **args):
+		method = args["method"]
+
 		if _mode == _MODE_MANIFEST or _mode == _MODE_JAVASCRIPT:
+			if method == "paste_message":
+				return True
+
 			for s in self.view.sel():
 				r = self.view.extract_scope(s.a)
 				str = self.view.substr(r)
@@ -120,7 +127,7 @@ class ChromeExtensionI18nHelperContextCommand(sublime_plugin.TextCommand):
 					return True
 			return False
 
-		if args["method"] == "trans" and _mode == _MODE_OTH_MESSAGE:
+		if method == "trans" and _mode == _MODE_OTH_MESSAGE:
 			s = self.view.sel()[0]
 			r = self.view.extract_scope(s.a)
 			str = self.view.substr(r)
@@ -297,7 +304,7 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 								self.def_loc, _MESSAGES_JSON_FILE)
 		if not os.path.isfile(def_path):
 			sublime.error_message(str.format(
-				"not exists default({0}) message.json file.", self.def_loc))
+				"not exists default({0}) messages.json file.", self.def_loc))
 			return
 
 		tmpl_loc = self.make_template_json(def_path)
@@ -311,7 +318,7 @@ class MessageJsonHelperCommand(sublime_plugin.TextCommand):
 
 
 class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
-	def run(self, edit):
+	def run(self, edit, **args):
 		file_name = self.view.file_name();
 		if not file_name:
 			return
@@ -319,27 +326,52 @@ class ChromeExtensionI18nHelperCommand(sublime_plugin.TextCommand):
 		base_name = os.path.basename(file_name).lower()
 		ext_name = os.path.splitext(file_name)[1].lower()
 
-		cmd_helper = None
-		if base_name == _MANIFEST_JSON_FILE:
-			cmd_helper = ManifestHelper(self.view)
-		elif ext_name == _SCRIPT_EXT:
-			cmd_helper = JavaScriptHelper(self.view)
+		if args["method"] == "paste_message":
+			mh = MessageHelper(self.view)
+			msgs = mh.read_default_message_json();
 
-		if cmd_helper:
-			try:
-				cmd_helper.setup_regions()
-				cmd_helper.run()
-			except:
-				cmd_helper.cancel()
-				raise
-		elif base_name == _MESSAGES_JSON_FILE:
-			self.view.run_command("message_json_helper")
+			messages = [];
+			ids = [];
+			for m in msgs:
+				print (msgs[m])
+				ids.append(m);
+				messages.append(msgs[m]["message"]);
+
+			def on_done(index):
+				if index < 0:
+					return;
+
+				for s in self.view.sel():
+					self.view.run_command("replace",
+						{
+							"a": s.a,
+							"b": s.b,
+							"text": '"' + ids[index] + '"'
+						})
+
+			self.view.window().show_quick_panel(messages, on_done);
 		else:
-			sublime.message_dialog("NOT SUPPORT FILE TYPE.\n\n" \
-				+ "    Support files\n" \
-				+ "        - javascripts(*.js)\n"
-				+ "        - manifest.json\n"
-				+ "        - message.json")
+			cmd_helper = None
+			if base_name == _MANIFEST_JSON_FILE:
+				cmd_helper = ManifestHelper(self.view)
+			elif ext_name == _SCRIPT_EXT:
+				cmd_helper = JavaScriptHelper(self.view)
+
+			if cmd_helper:
+				try:
+					cmd_helper.setup_regions()
+					cmd_helper.run()
+				except:
+					cmd_helper.cancel()
+					raise
+			elif base_name == _MESSAGES_JSON_FILE:
+				self.view.run_command("message_json_helper")
+			else:
+				sublime.message_dialog("NOT SUPPORT FILE TYPE.\n\n" \
+					+ "    Support files\n" \
+					+ "        - javascripts(*.js)\n"
+					+ "        - manifest.json\n"
+					+ "        - messages.json")
 
 
 class I18nHelper:

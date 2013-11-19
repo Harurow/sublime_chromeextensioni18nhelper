@@ -15,6 +15,9 @@ Add a message to default message.json file from manifest.json file or javascript
 Copy or merge to other locale message.json files from default locale message.json file.
 ![copy or merge message demo](img/copy_message.gif)
 
+### paste message id ###
+Paste 'message id' from default locale message.json file.
+
 ### tranlate helper ###
 Transfer via a browser to Google translate text from message.json file
 ![trans message demo](img/trans_message.gif)
